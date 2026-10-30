@@ -8,9 +8,9 @@
   "list_refresh_hours": 24,
   "patterns_every_hours": 20,
   "liquid_every_hours": 44,
-  "max_requests": 185,
-  "reserve": 12,
+  "max_requests": 400,
+  "reserve": 40,
   "pause_s": 1.0,
-  "time_budget_s": 480,
+  "time_budget_s": 720,
   "keep_days": 180
 }
