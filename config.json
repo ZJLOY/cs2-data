@@ -15,5 +15,6 @@
   "keep_days": 180,
   "hunt": true,
   "hunt_max_tier": 2,
-  "hunt_max_requests": 80
+  "hunt_max_requests": 120,
+  "hunt_chunk": 40
 }

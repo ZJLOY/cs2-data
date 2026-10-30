@@ -158,31 +158,46 @@ def hunt(items, idx, max_requests):
                 print(f"  номера скина {base}: {str(e)[:60]}")
             if base not in idx:
                 continue
-        q = urllib.parse.urlencode({"def_index": idx[base][0], "paint_index": idx[base][1], "type": "buy_now",
-                                    "paint_seed": ",".join(map(str, seeds[:120])), "sort_by": "lowest_price",
-                                    "max_price": cap, "limit": 50})
-        try:
-            d, h = get_json("https://csfloat.com/api/v1/listings?" + q, {"Authorization": KEY})
-        except RateLimited:
-            print("Охота: CSFloat ограничил запросы")
-            break
-        except Exception as e:
-            print(f"  охота {base}: {str(e)[:80]}")
-            continue
-        done += 1
-        try:
-            left = int(h.get("x-ratelimit-remaining"))
-        except (TypeError, ValueError):
-            pass
-        for x in (d.get("data") if isinstance(d, dict) else d) or []:
-            it = x.get("item") or {}
-            if x.get("state", "listed") != "listed" or not x.get("price"):
+        # номера — пачками по hunt_chunk; если CSFloat отклонит пачку (400), делим её пополам
+        chunks = [seeds[i:i + CFG["hunt_chunk"]] for i in range(0, len(seeds), CFG["hunt_chunk"])]
+        limited = False
+        while chunks and done < max_requests and not (left is not None and left <= CFG["reserve"]):
+            part = chunks.pop(0)
+            q = urllib.parse.urlencode({"def_index": idx[base][0], "paint_index": idx[base][1], "type": "buy_now",
+                                        "paint_seed": ",".join(map(str, part)), "sort_by": "lowest_price",
+                                        "max_price": cap, "limit": 50})
+            try:
+                d, h = get_json("https://csfloat.com/api/v1/listings?" + q, {"Authorization": KEY})
+            except RateLimited:
+                print("Охота: CSFloat ограничил запросы")
+                limited = True
+                break
+            except urllib.error.HTTPError as e:
+                done += 1
+                if e.code == 400 and len(part) > 1:
+                    chunks[:0] = [part[:len(part) // 2], part[len(part) // 2:]]
+                else:
+                    print(f"  охота {base}: {str(e)[:80]}")
                 continue
-            pred = (x.get("reference") or {}).get("predicted_price")
-            lots.append([it.get("market_hash_name"), x["price"] / 100, it.get("float_value"), it.get("paint_seed"),
-                         str(x.get("id")), it.get("inspect_link") or "", x.get("created_at"),
-                         pred / 100 if pred else None])
-        time.sleep(CFG["pause_s"])
+            except Exception as e:
+                print(f"  охота {base}: {str(e)[:80]}")
+                continue
+            done += 1
+            try:
+                left = int(h.get("x-ratelimit-remaining"))
+            except (TypeError, ValueError):
+                pass
+            for x in (d.get("data") if isinstance(d, dict) else d) or []:
+                it = x.get("item") or {}
+                if x.get("state", "listed") != "listed" or not x.get("price"):
+                    continue
+                pred = (x.get("reference") or {}).get("predicted_price")
+                lots.append([it.get("market_hash_name"), x["price"] / 100, it.get("float_value"), it.get("paint_seed"),
+                             str(x.get("id")), it.get("inspect_link") or "", x.get("created_at"),
+                             pred / 100 if pred else None])
+            time.sleep(CFG["pause_s"])
+        if limited:
+            break
     print(f"Охота за номерами: скинов проверено {done}, лотов редких номеров найдено {len(lots)}; "
           f"осталось запросов на лоты: {left}")
     return lots
