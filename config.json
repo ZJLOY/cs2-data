@@ -12,5 +12,8 @@
   "reserve": 40,
   "pause_s": 1.0,
   "time_budget_s": 720,
-  "keep_days": 180
+  "keep_days": 180,
+  "hunt": true,
+  "hunt_max_tier": 2,
+  "hunt_max_requests": 80
 }

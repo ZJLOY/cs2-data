@@ -49,7 +49,7 @@ jobs:
       - name: Загрузить данные
         run: |
           files=""
-          for f in sales.json.gz items.json status.json; do [ -f "$f" ] && files="$files $f"; done
+          for f in sales.json.gz items.json status.json hunt.json; do [ -f "$f" ] && files="$files $f"; done
           [ -n "$files" ] && gh release upload data $files --clobber
 
       - name: Раз в неделю отметиться в репозитории (иначе GitHub отключит расписание)
