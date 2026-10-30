@@ -1,0 +1,62 @@
+# Сбор истории продаж CSFloat в неактивные часы владельца. Время в cron — UTC (Москва = UTC+3).
+# Результат — в релизе "data": sales.json.gz (продажи), items.json (список предметов), status.json.
+name: harvest
+
+on:
+  schedule:
+    - cron: "25 21-23 * * *"   # каждый день 00:25–02:25 МСК
+    - cron: "25 0-2 * * *"     # каждый день 03:25–05:25 МСК
+    - cron: "25 3-12 * * 1,5"  # пн, пт 06:25–15:25 МСК
+    - cron: "25 3-8 * * 2,4"   # вт, чт 06:25–11:25 МСК
+    - cron: "25 3-7 * * 3"     # ср    06:25–10:25 МСК
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Собрать сейчас, даже в свободные часы"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: harvest
+  cancel-in-progress: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CSFLOAT_API_KEY: ${{ secrets.CSFLOAT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - run: pip install brotli
+
+      - name: Скачать прошлые данные
+        run: |
+          gh release view data >/dev/null 2>&1 || gh release create data -t data -n "Данные сборщика: продажи CSFloat"
+          gh release download data -p sales.json.gz -p items.json || true
+
+      - run: python harvest.py ${{ inputs.force && '--force' || '' }}
+
+      - name: Загрузить данные
+        run: |
+          files=""
+          for f in sales.json.gz items.json status.json; do [ -f "$f" ] && files="$files $f"; done
+          [ -n "$files" ] && gh release upload data $files --clobber
+
+      - name: Раз в неделю отметиться в репозитории (иначе GitHub отключит расписание)
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt $(( 6 * 86400 )) ] && [ -f status.json ]; then
+            git config user.name "harvest-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add status.json && git commit -m "Статус сборщика" && git push
+          fi
