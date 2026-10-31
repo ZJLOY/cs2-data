@@ -256,6 +256,34 @@ def csfloat_sales(name):
     return out, left, di
 
 
+def collect_sales(data, names, deadline, max_requests):
+    """Скачивает продажи CSFloat по названиям (по порядку), пока есть время и запросы; дописывает в data.
+    Возвращает (обновлено предметов, новых продаж, осталось запросов)."""
+    fetched, t_now = data.setdefault("fetched", {}), int(time.time())
+    done, got, left = 0, 0, None
+    for n in names:
+        if time.time() > deadline or (left is not None and left <= CFG["reserve"]) or done >= max_requests:
+            break
+        try:
+            rows, left, di = csfloat_sales(n)
+            if di:
+                data.setdefault("idx", {})[pattern_base(n)] = di
+        except RateLimited:
+            print("CSFloat ограничил запросы — остальное в следующий раз")
+            break
+        except Exception as e:
+            print(f"  {n}: {str(e)[:80]}")
+            fetched[n] = t_now  # чтобы не застревать на одном предмете
+            continue
+        old = {(r[0], r[1]) for r in data["sales"].get(n, [])}
+        new = [r for r in rows if (r[0], r[1]) not in old]
+        data["sales"][n] = sorted(data["sales"].get(n, []) + new)
+        fetched[n] = t_now
+        done, got = done + 1, got + len(new)
+        time.sleep(CFG["pause_s"])
+    return done, got, left
+
+
 def main():
     now = datetime.now(MSK)
     ok, why = allowed(now)
@@ -288,28 +316,7 @@ def main():
     due += [(1, fetched.get(n, 0), n) for n in items["liquid"]
             if t_now - fetched.get(n, 0) >= CFG["liquid_every_hours"] * 3600]
     due = [n for _, _, n in sorted(due)]
-    deadline = time.time() + CFG["time_budget_s"]
-    done, got, left = 0, 0, None
-    for n in due:
-        if time.time() > deadline or (left is not None and left <= CFG["reserve"]) or done >= CFG["max_requests"]:
-            break
-        try:
-            rows, left, di = csfloat_sales(n)
-            if di:
-                data.setdefault("idx", {})[pattern_base(n)] = di
-        except RateLimited:
-            print("CSFloat ограничил запросы — остальное в следующий раз")
-            break
-        except Exception as e:
-            print(f"  {n}: {str(e)[:80]}")
-            fetched[n] = t_now  # чтобы не застревать на одном предмете
-            continue
-        old = {(r[0], r[1]) for r in data["sales"].get(n, [])}
-        new = [r for r in rows if (r[0], r[1]) not in old]
-        data["sales"][n] = sorted(data["sales"].get(n, []) + new)
-        fetched[n] = t_now
-        done, got = done + 1, got + len(new)
-        time.sleep(CFG["pause_s"])
+    done, got, left = collect_sales(data, due, time.time() + CFG["time_budget_s"], CFG["max_requests"])
     keep = t_now - CFG["keep_days"] * 86400
     for n in list(data["sales"]):
         data["sales"][n] = [r for r in data["sales"][n] if r[0] >= keep]

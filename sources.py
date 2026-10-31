@@ -622,6 +622,14 @@ def harvest_sales(url=HARVEST_URL):
     return json.loads(raw)
 
 
+def harvest_lots(url=HARVEST_URL.replace("sales.json.gz", "cf_lots.json")):
+    """Лоты CSFloat от дневного сборщика (ZJLOY/cs2-data, тот же поиск, что и в проверке сделок):
+    {"ts": время, "lots": {название: [[цена $, float, номер, [[наклейка, износ]], id лота, ссылка]]},
+     "info": {"requests", "left", "reset", "done": [названия], "idx", "pred", "tags"}}."""
+    raw, _ = http_get(url, retries=2, timeout=60)
+    return json.loads(raw)
+
+
 def harvest_hunt(url=HARVEST_URL.replace("sales.json.gz", "hunt.json")):
     """Ночная охота за номерами от сборщика: {"ts": время, "lots": [[название, цена $, float, номер, id лота,
     ссылка осмотра, когда выставлен, оценка CSFloat $], ...]}."""
@@ -787,7 +795,7 @@ def _cf_sticker(name):
     return name if name.startswith(("Sticker |", "Patch |")) else "Sticker | " + name
 
 
-def csfloat_lots(jobs, api_key, reserve=10, log=print):
+def csfloat_lots(jobs, api_key, reserve=10, log=print, max_requests=None):
     """
     Лоты CSFloat (нужен ключ), только «купить сейчас». jobs — [(название, sort_by)], где sort_by —
     lowest_price (самые дешёвые) или lowest_float (самые низкие float); по 50 лотов на запрос.
@@ -813,6 +821,9 @@ def csfloat_lots(jobs, api_key, reserve=10, log=print):
             params, pages, tag = {"market_hash_name": name, "sort_by": sort}, 1, None
         cursor = None
         for _ in range(pages):
+            if max_requests is not None and info["requests"] >= max_requests:
+                stop = True
+                break
             if info["left"] is not None and info["left"] <= reserve:
                 log(f"  CSFloat: лимит запросов почти исчерпан (осталось {info['left']}) — остальное в следующий раз")
                 stop = True

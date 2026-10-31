@@ -1,0 +1,31 @@
+{
+ "filters": {
+  "min_price": 1,
+  "max_price": 60,
+  "min_volume_30d": 30,
+  "top": 50
+ },
+ "deal_markets": [
+  "Lis-Skins",
+  "CS.Money",
+  "Market.CSGO",
+  "CSFloat"
+ ],
+ "patterns_max_price_rub": 15000,
+ "pattern_refresh_days": 3,
+ "rub_markup": 0.021,
+ "csfloat_lots_items": 45,
+ "csfloat_lots_core": 20,
+ "csfloat_lots_pattern_items": 20,
+ "csfloat_scan": {
+  "most_recent": 2,
+  "best_deal": 3,
+  "highest_discount": 2,
+  "lowest_float": 2
+ },
+ "csfloat_scan_min_usd": 1,
+ "csfloat_scan_max_usd": null,
+ "csfloat_hunt_skins": 15,
+ "csfloat_hunt_max_tier": 2,
+ "csfloat_hunt_chunk": 40
+}

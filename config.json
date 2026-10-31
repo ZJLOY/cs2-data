@@ -1,10 +1,65 @@
 {
   "_help": "Время — по Москве. free_hours — часы владельца, когда сбор не идёт (лимит CSFloat нужен основному поиску сделок). main_runs — начало основного сбора по дням: за guard_minutes до него сбор тоже не идёт.",
-  "free_hours": {"mon": [18, 24], "tue": [14, 24], "wed": [13, 24], "thu": [14, 24], "fri": [18, 24], "sat": [8, 24], "sun": [8, 24]},
-  "main_runs": {"mon": ["17:20"], "tue": ["13:20"], "wed": ["12:20"], "thu": ["13:20"], "fri": ["17:20"], "sat": ["07:20"], "sun": ["07:20"]},
+  "free_hours": {
+    "mon": [
+      18,
+      24
+    ],
+    "tue": [
+      14,
+      24
+    ],
+    "wed": [
+      13,
+      24
+    ],
+    "thu": [
+      14,
+      24
+    ],
+    "fri": [
+      18,
+      24
+    ],
+    "sat": [
+      8,
+      24
+    ],
+    "sun": [
+      8,
+      24
+    ]
+  },
+  "main_runs": {
+    "mon": [
+      "17:20"
+    ],
+    "tue": [
+      "13:20"
+    ],
+    "wed": [
+      "12:20"
+    ],
+    "thu": [
+      "13:20"
+    ],
+    "fri": [
+      "17:20"
+    ],
+    "sat": [
+      "07:20"
+    ],
+    "sun": [
+      "07:20"
+    ]
+  },
   "guard_minutes": 75,
   "patterns_max_usd": 180,
-  "liquid": {"min_volume_30d": 30, "min_price": 1, "max_price": 60},
+  "liquid": {
+    "min_volume_30d": 30,
+    "min_price": 1,
+    "max_price": 60
+  },
   "list_refresh_hours": 24,
   "patterns_every_hours": 20,
   "liquid_every_hours": 44,
@@ -16,5 +71,10 @@
   "hunt": true,
   "hunt_max_tier": 2,
   "hunt_max_requests": 120,
-  "hunt_chunk": 40
+  "hunt_chunk": 40,
+  "_help_day": "Дневной сборщик (day.py) — в свободные часы: day_cf_requests — запросов лотов CSFloat за запуск (лимит ~200 в час на ключ, запуск каждые 30 минут); day_sales_hours — как часто обновлять продажи ходового предмета; day_sales_max — предметов за запуск; day_time_budget_s — время на запуск.",
+  "day_cf_requests": 95,
+  "day_sales_hours": 6,
+  "day_sales_max": 200,
+  "day_time_budget_s": 600
 }

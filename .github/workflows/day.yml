@@ -1,0 +1,49 @@
+# Дневной сборщик: в свободные часы владельца (когда ночной сборщик не работает) — лоты CSFloat для сделок,
+# история продаж CSFloat по ходовым предметам и цены редких паттернов. Время в cron — UTC (Москва = UTC+3).
+# Запуск каждые 30 минут с 06:20 до 23:50 МСК; в часы ночного сборщика day.py сразу выходит.
+name: day
+
+on:
+  schedule:
+    - cron: "20,50 3-20 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Собрать сейчас, даже в часы ночного сборщика"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: harvest             # общая с ночным сборщиком: оба пишут sales.json.gz
+  cancel-in-progress: false
+
+jobs:
+  day:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CSFLOAT_API_KEY: ${{ secrets.CSFLOAT_API_KEY }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - run: pip install brotli ijson
+
+      - name: Скачать прошлые данные
+        run: gh release download data -p sales.json.gz -p day_state.json -p pat_db.json.gz || true
+
+      - run: python day.py ${{ inputs.force && '--force' || '' }}
+
+      - name: Загрузить данные
+        run: |
+          files=""
+          for f in sales.json.gz cf_lots.json day_state.json pat_db.json.gz day_status.json; do [ -f "$f" ] && files="$files $f"; done
+          [ -n "$files" ] && gh release upload data $files --clobber || true
