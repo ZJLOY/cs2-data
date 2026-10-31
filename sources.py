@@ -522,9 +522,12 @@ def steam_id64(text):
     return m.group(1).decode()
 
 
+INSPECT_LINK = "steam://run/730//+csgo_econ_action_preview%20"
+
+
 def steam_inventory(steamid, props=None):
     """Предметы CS2 из открытого инвентаря Steam: {market_hash_name: количество} (только продаваемые).
-    Если передан список props, добавляет в него (название, float, номер паттерна) каждого предмета —
+    Если передан список props, добавляет в него (название, float, номер паттерна, ссылка осмотра) каждого скина —
     Steam отдаёт их в asset_properties. Предметы на удержании после обмена Steam публично не показывает."""
     counts, start = {}, None
     while True:
@@ -543,7 +546,8 @@ def steam_inventory(steamid, props=None):
         desc = {(x["classid"], x.get("instanceid", "0")): x for x in d.get("descriptions", [])}
         ap = {}
         for p in d.get("asset_properties") or []:
-            v = {q.get("name"): q.get("int_value") or q.get("float_value") for q in p.get("asset_properties") or []}
+            v = {q.get("name"): q.get("int_value") or q.get("float_value") or q.get("string_value")
+                 for q in p.get("asset_properties") or []}
             ap[str(p.get("assetid"))] = v
         for a in d["assets"]:
             x = desc.get((a["classid"], a.get("instanceid", "0")))
@@ -553,7 +557,10 @@ def steam_inventory(steamid, props=None):
                 v = ap.get(str(a["assetid"])) or {}
                 if props is not None and v.get("Wear Rating"):
                     seed = v.get("Pattern Template")
-                    props.append((n, float(v["Wear Rating"]), int(seed) if seed is not None else None))
+                    # «Item Certificate» — сам предмет для ссылки осмотра в игре (с наклейками)
+                    cert = v.get("Item Certificate")
+                    props.append((n, float(v["Wear Rating"]), int(seed) if seed is not None else None,
+                                  INSPECT_LINK + cert if cert else ""))
         if not d.get("more_items"):
             break
         start = d.get("last_assetid")
