@@ -210,7 +210,7 @@ def build_items():
     price = {it["market_hash_name"]: it.get("min_price") for it in listings}
     vol = {it["market_hash_name"]: ((it.get("last_30_days") or {}).get("volume") or 0,
                                     (it.get("last_7_days") or {}).get("median")) for it in sales}
-    bases = pattern_bases()
+    bases = pattern_bases() | set(CFG.get("extra_patterns") or [])  # + скины без цен на сайте: копим их продажи
     cheap = {}
     for n, p in price.items():
         if p and not n.startswith("Souvenir "):

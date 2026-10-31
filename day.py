@@ -80,7 +80,8 @@ def main():
     pat = load("pat_db.json.gz", {})
     budget_key = f"{deal.get('patterns_max_price_rub')}|v2"
     if (not pat.get("db") or pat.get("budget") != budget_key
-            or time.time() - pat.get("ts", 0) > deal.get("pattern_refresh_days", 3) * 86400):
+            or time.time() - pat.get("ts", 0) > deal.get("pattern_refresh_days", 3) * 86400
+            or (CFG.get("extra_patterns") and "sf" not in pat)):  # скины extra_patterns ещё не добавлены
         t = time.time()
         budget = (deal.get("patterns_max_price_rub") or 10 ** 9) / rate
         cheap = {}
@@ -90,8 +91,23 @@ def main():
                 cheap[b] = min(cheap.get(b, r["min_price"]), r["min_price"])
         try:
             db = sources.pattern_prices({b for b, p in cheap.items() if p <= budget})
+            # скины без цен на сайте (extra_patterns): лучшие номера по Skinflow, продажи — свои (ниже, каждый запуск)
+            sf = {}
+            for b in CFG.get("extra_patterns") or []:
+                if b in db or not cheap.get(b) or cheap[b] > budget:
+                    continue
+                try:
+                    seeds, url = sources.skinflow_seeds(b)
+                    if seeds:
+                        sf[b] = {"seeds": seeds, "url": url}
+                    else:
+                        print(f"  {b}: на Skinflow нет разбора паттернов — только копим продажи")
+                except Exception as e:
+                    print(f"  {b}: Skinflow не ответил: {str(e)[:80]}")
+                    if b in (pat.get("sf") or {}):
+                        sf[b] = pat["sf"][b]
             if db:
-                pat = {"ts": int(time.time()), "budget": budget_key, "db": db}
+                pat = {"ts": int(time.time()), "budget": budget_key, "db": db, "sf": sf}
                 save("pat_db.json.gz", pat)
             print(f"Паттерны: предметов {len(db)}, групп {sum(map(len, db.values()))} за {time.time() - t:.0f} с")
         except Exception as e:
@@ -100,6 +116,14 @@ def main():
 
     # лоты CSFloat — тот же поиск, что в анализаторе; запросов не больше day_cf_requests (лимит ~200 в час на ключ)
     data = load("sales.json.gz", {"sales": {}, "fetched": {}})
+    # группы из своих продаж — для скинов без цен на cs2pattern-prices.com (номера по Skinflow)
+    if pat.get("sf"):
+        for b, v in pat["sf"].items():
+            pat["db"][b] = [sources.own_pattern_group(b, v["seeds"], v["url"], data.get("sales") or {})]
+        pat_db = pat["db"]
+        save("pat_db.json.gz", pat)
+        print("Паттерны по своим продажам: " + ", ".join(f"{b} — продаж лучших номеров {len(pat_db[b][0]['sales'])}"
+                                                     for b in pat["sf"]))
     for b, di in (data.get("idx") or {}).items():  # номера скинов, которые узнал ночной сборщик, — для охоты
         state.setdefault("cf_idx", {}).setdefault(b, di)
     cbase = (lambda ch: lambda n: ch(n, "CSFloat"))(cfround.cheapest_fn(deal, sp, mk))

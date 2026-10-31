@@ -982,6 +982,55 @@ def pattern_prices(names, threads=2, log=print):
     return out
 
 
+# ---------- Skinflow (данные Dispattern): лучшие номера скинов, которых нет на cs2pattern-prices.com ----------
+SKINFLOW = "https://skinflow.gg"
+WEAR_SHORT = {"Factory New": "FN", "Minimal Wear": "MW", "Field-Tested": "FT", "Well-Worn": "WW", "Battle-Scarred": "BS"}
+
+
+def _sf_slug(s):
+    s = s.replace("★", "").replace("'", "").replace("’", "").strip().lower()  # Minotaur's → minotaurs
+    return re.sub(r"^-|-$", "", re.sub(r"[^a-z0-9]+", "-", s))
+
+
+def skinflow_seeds(base):
+    """
+    Лучшие номера скина по Skinflow: для каждого цвета разбора (например, «спереди · золото») — 5 номеров,
+    где этого цвета больше всего. Возвращает (номера, ссылка на номер с «{seed}»); номеров нет — разбора нет.
+    """
+    item, skin = base.replace("★", "").strip().split(" | ", 1)
+    q = urllib.parse.urlencode({"item": _sf_slug(item), "skin": _sf_slug(skin)})
+    raw, _ = http_get(f"{SKINFLOW}/api/pattern-checker/skin?{q}", retries=2, timeout=40)
+    j = json.loads(raw)
+    seeds = sorted({int(s["seed"]) for t in j.get("topSeeds") or [] for s in t.get("seeds") or []})
+    return seeds, f"{SKINFLOW}/ru/pattern-checker/{_sf_slug(item)}/{_sf_slug(skin)}?seed={{seed}}&view=Front"
+
+
+def own_pattern_group(base, seeds, url, sales_by_name, days=180):
+    """
+    Группа паттернов из наших продаж CSFloat (сборщик) — для скинов, цен на которые нет на cs2pattern-prices.com:
+    номера — лучшие по Skinflow, продажи — продажи этих номеров за days дней в том же виде, что у pattern_group:
+    [номер, износ, "st"/"normal", цена, дата, float]. Продажи, где наклейки стоят от 5% цены, не берём.
+    Цена появится, только когда за номера доплатят: продажи без доплаты анализатор не учитывает.
+    """
+    since, want, rows = time.time() - days * 86400, set(seeds), []
+    for n, rs in sales_by_name.items():
+        if n.startswith("Souvenir ") or not n.endswith(")"):
+            continue
+        plain = n.replace("StatTrak™ ", "")
+        if plain.rsplit(" (", 1)[0] != base:
+            continue
+        wear = WEAR_SHORT.get(plain.rsplit(" (", 1)[1].rstrip(")"))
+        for r in rs:
+            ts, price, fl, seed = r[:4]
+            st = r[4] if len(r) > 4 else 0
+            if wear and seed is not None and int(seed) in want and ts >= since and (st or 0) < 0.05 * price:
+                rows.append([int(seed), wear, "st" if "StatTrak™" in n else "normal", price,
+                             datetime.fromtimestamp(ts).strftime("%Y-%m-%d"), fl])
+    rows.sort(key=lambda x: x[4])
+    # tier 3 — охота за номерами (до 2-го тира) их не ищет: цены пока нет
+    return {"label": "Лучшие номера по Skinflow", "tier": 3, "url": url, "seeds": sorted(want), "sales": rows[-200:]}
+
+
 # ---------- Waxpeer: все лоты (открытая выгрузка CSV), float и паттерн — из ссылки осмотра ----------
 def _varint(b, i):
     r = sh = 0

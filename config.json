@@ -55,6 +55,8 @@
   },
   "guard_minutes": 75,
   "patterns_max_usd": 180,
+  "_help_extra_patterns": "Скины с паттернами, которых нет на cs2pattern-prices.com (например, из гайда cs.money). Их продажи CSFloat копит ночной сборщик, номера — лучшие по Skinflow (данные Dispattern), цена — по нашим продажам этих номеров, когда за них доплатят. Без разбора на Skinflow скин только копит продажи.",
+  "extra_patterns": ["MAC-10 | Last Dive", "UMP-45 | Minotaur's Labyrinth", "Five-SeveN | Neon Kimono"],
   "liquid": {
     "min_volume_30d": 30,
     "min_price": 1,
