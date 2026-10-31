@@ -675,6 +675,32 @@ def csfloat_sales(name, api_key=None):
     return out
 
 
+def csfloat_my_sales(api_key, max_pages=20):
+    """Ваши продажи на CSFloat (нужен ключ): ({"fee": комиссия продавца}, [{"id", "name", "price"($), "date",
+    "float", "seed", "state", "hold_until"}]). state: pending — деньги придут после защиты обмена (hold_until),
+    verified — получены, failed/cancelled — сделка сорвалась или отменена."""
+    h = {"Authorization": api_key, "Accept": "application/json"}
+    me, _ = get_json("https://csfloat.com/api/v1/me", h)
+    me = me.get("user") or {}
+    out, limit = [], 100
+    for page in range(max_pages):
+        data, _ = get_json(f"https://csfloat.com/api/v1/me/trades?role=seller&state=pending,verified,failed,cancelled"
+                           f"&limit={limit}&page={page}", h)
+        trades = data.get("trades") or []
+        for t in trades:
+            c = t.get("contract") or {}
+            it = c.get("item") or {}
+            if t.get("seller_id") != me.get("steam_id") or not c.get("price") or not it.get("market_hash_name"):
+                continue
+            when = t.get("accepted_at") or c.get("sold_at") or t.get("created_at") or ""
+            out.append({"id": str(t.get("id")), "name": it["market_hash_name"], "price": c["price"] / 100,
+                        "date": when[:10], "float": it.get("float_value"), "seed": it.get("paint_seed"),
+                        "state": t.get("state") or "", "hold_until": (t.get("verify_sale_at") or "")[:10]})
+        if len(trades) < limit:
+            break
+    return {"fee": me.get("fee")}, out
+
+
 def lis_api(path, key, params=None):
     """Запрос к API Lis-Skins (нужен ключ из профиля lis-skins.com)."""
     q = ("?" + urllib.parse.urlencode(params)) if params else ""
