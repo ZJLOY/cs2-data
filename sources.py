@@ -630,6 +630,16 @@ def harvest_lots(url=HARVEST_URL.replace("sales.json.gz", "cf_lots.json")):
     return json.loads(raw)
 
 
+def harvest_patdb(url=HARVEST_URL.replace("sales.json.gz", "pat_db.json.gz")):
+    """Цены редких паттернов от дневного сборщика: {"ts": время, "budget": "бюджет|v2", "db": как pattern_prices}."""
+    raw, _ = http_get(url, retries=2, timeout=120)
+    try:
+        raw = gzip.decompress(raw)
+    except OSError:
+        pass
+    return json.loads(raw)
+
+
 def harvest_hunt(url=HARVEST_URL.replace("sales.json.gz", "hunt.json")):
     """Ночная охота за номерами от сборщика: {"ts": время, "lots": [[название, цена $, float, номер, id лота,
     ссылка осмотра, когда выставлен, оценка CSFloat $], ...]}."""
