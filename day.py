@@ -99,6 +99,9 @@ def main():
     pat_db = pat.get("db") or {}
 
     # лоты CSFloat — тот же поиск, что в анализаторе; запросов не больше day_cf_requests (лимит ~200 в час на ключ)
+    data = load("sales.json.gz", {"sales": {}, "fetched": {}})
+    for b, di in (data.get("idx") or {}).items():  # номера скинов, которые узнал ночной сборщик, — для охоты
+        state.setdefault("cf_idx", {}).setdefault(b, di)
     cbase = (lambda ch: lambda n: ch(n, "CSFloat"))(cfround.cheapest_fn(deal, sp, mk))
     wanted = cfround.wanted_names(deal, sp)
     pat_names = {n for n in sp if cfround.pattern_base(n) in pat_db}
@@ -114,7 +117,6 @@ def main():
     save("day_state.json", state)
 
     # история продаж CSFloat: ходовые предметы (сначала самые продаваемые), каждый — раз в day_sales_hours часов
-    data = load("sales.json.gz", {"sales": {}, "fetched": {}})
     data.setdefault("fetched", {})
     t_now, every = int(time.time()), float(CFG.get("day_sales_hours", 6)) * 3600
     due = sorted((n for n in wanted if t_now - data["fetched"].get(n, 0) >= every), key=lambda n: -(sp[n].get("v30") or 0))
