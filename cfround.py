@@ -69,7 +69,12 @@ def run(cfg, key, wanted, pat_names, pat_db, cbase, v30, rate, state, log=print,
     p_budget = (cfg.get("patterns_max_price_rub") or 10 ** 9) / rate
     p_all = sorted((n for n in pat_names if n not in liq and cbase(n) and cbase(n) <= p_budget), key=by_vol)
     pn, p_start = _turn(p_all, int(cfg.get("csfloat_lots_pattern_items", 30)), state, "cf_prot")
-    item_jobs = [(n, s) for n in liq for s in ("lowest_price", "lowest_float")] + [(n, "lowest_price") for n in pn]
+    # самые ходовые — и самые дешёвые лоты, и лоты с самым низким float; остальные по очереди — только самые дешёвые
+    # (один запрос на предмет вместо двух: за проверку проходит вдвое больше скинов; csfloat_rot_low_float: true — оба)
+    both = ("lowest_price", "lowest_float")
+    rot_sorts = both if cfg.get("csfloat_rot_low_float", False) else ("lowest_price",)
+    item_jobs = ([(n, s) for n in core for s in both] + [(n, s) for n in chunk for s in rot_sorts]
+                 + [(n, "lowest_price") for n in pn])
     # поиск по всему рынку: свежие лоты, «лучшие сделки» и «наибольшие скидки» по оценке CSFloat, самый низкий float
     lo_c = int(float(cfg.get("csfloat_scan_min_usd", 1)) * 100)
     hi_c = int(float(cfg.get("csfloat_scan_max_usd") or cfg["filters"].get("max_price", 60)) * 100)
