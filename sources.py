@@ -324,7 +324,9 @@ def lisskins(keep_floats, keep_stickers):
     req = urllib.request.Request(LIS_URL, headers={"User-Agent": UA, "Accept-Encoding": "gzip"})
     resp = urllib.request.urlopen(req, timeout=60)
     gzipped = resp.headers.get("Content-Encoding") == "gzip"
-    resp = Guard(resp, max_s=600, min_bps=50000)  # обычно выгрузка скачивается за 1–3 минуты
+    # обычно выгрузка (сотни МБ) скачивается за 1–3 минуты; медленнее 150 КБ/с она не успеет и за 10 минут —
+    # такую загрузку обрываем через 45 секунд, а не ждём до конца срока
+    resp = Guard(resp, max_s=600, min_bps=150000, grace=45)
     src = gzip.GzipFile(fileobj=resp) if gzipped else resp
     agg, floats, stick, prices, cheap = {}, {}, [], {}, {}
     for it in ijson.items(src, "items.item", use_float=True):
