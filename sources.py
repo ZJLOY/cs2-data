@@ -29,6 +29,39 @@ class RateLimited(Exception):
     pass
 
 
+class SlowDownload(TimeoutError):
+    """Загрузка идёт слишком медленно или слишком долго (связь «капает» по байту и не обрывается)."""
+
+
+class Guard:
+    """
+    Обёртка над ответом сервера: прерывает загрузку, если она идёт дольше max_s секунд или после grace секунд
+    средняя скорость ниже min_bps байт в секунду. Обычный таймаут сокета тут не помогает: он срабатывает,
+    только когда данных нет совсем, а при плохой связи они приходят по чуть-чуть — и загрузка висит часами.
+    """
+    def __init__(self, f, max_s=300, min_bps=20000, grace=30):
+        self.f, self.max_s, self.min_bps, self.grace = f, max_s, min_bps, grace
+        self.t0, self.n = time.time(), 0
+
+    def read(self, n=-1):
+        b = self.f.read(n)
+        self.n += len(b)
+        el = time.time() - self.t0
+        if b and (el > self.max_s or (el > self.grace and self.n / el < self.min_bps)):
+            raise SlowDownload(f"загрузка слишком медленная: {self.n / 1e6:.1f} МБ за {el:.0f} с")
+        return b
+
+
+def _read_all(r, max_s):
+    """Тело ответа целиком, кусками — с общим сроком (см. Guard)."""
+    g, parts = Guard(r, max_s=max_s, min_bps=2000), []
+    while True:
+        b = g.read(1 << 16)
+        if not b:
+            return b"".join(parts)
+        parts.append(b)
+
+
 def http_get(url, headers=None, retries=3, timeout=60):
     h = {"User-Agent": UA, "Accept-Encoding": "br, gzip" if brotli else "gzip"}
     h.update(headers or {})
@@ -36,7 +69,7 @@ def http_get(url, headers=None, retries=3, timeout=60):
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
-                raw = r.read()
+                raw = _read_all(r, max_s=max(180, 5 * timeout))
                 enc = r.headers.get("Content-Encoding", "")
                 if enc == "br":
                     raw = brotli.decompress(raw)
@@ -289,8 +322,10 @@ def lisskins(keep_floats, keep_stickers):
     """
     import ijson
     req = urllib.request.Request(LIS_URL, headers={"User-Agent": UA, "Accept-Encoding": "gzip"})
-    resp = urllib.request.urlopen(req, timeout=180)
-    src = gzip.GzipFile(fileobj=resp) if resp.headers.get("Content-Encoding") == "gzip" else resp
+    resp = urllib.request.urlopen(req, timeout=60)
+    gzipped = resp.headers.get("Content-Encoding") == "gzip"
+    resp = Guard(resp, max_s=600, min_bps=50000)  # обычно выгрузка скачивается за 1–3 минуты
+    src = gzip.GzipFile(fileobj=resp) if gzipped else resp
     agg, floats, stick, prices, cheap = {}, {}, [], {}, {}
     for it in ijson.items(src, "items.item", use_float=True):
         name, price = it.get("name"), it.get("price")
