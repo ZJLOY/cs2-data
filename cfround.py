@@ -73,8 +73,9 @@ def run(cfg, key, wanted, pat_names, pat_db, cbase, v30, rate, state, log=print,
     # (один запрос на предмет вместо двух: за проверку проходит вдвое больше скинов; csfloat_rot_low_float: true — оба)
     both = ("lowest_price", "lowest_float")
     rot_sorts = both if cfg.get("csfloat_rot_low_float", False) else ("lowest_price",)
-    item_jobs = ([(n, s) for n in core for s in both] + [(n, s) for n in chunk for s in rot_sorts]
-                 + [(n, "lowest_price") for n in pn])
+    # при нехватке лимита последние в очереди не успевают: скины с паттернами идут раньше обычных по очереди
+    item_jobs = ([(n, s) for n in core for s in both] + [(n, "lowest_price") for n in pn]
+                 + [(n, s) for n in chunk for s in rot_sorts])
     # поиск по всему рынку: свежие лоты, «лучшие сделки» и «наибольшие скидки» по оценке CSFloat, самый низкий float
     lo_c = int(float(cfg.get("csfloat_scan_min_usd", 1)) * 100)
     hi_c = int(float(cfg.get("csfloat_scan_max_usd") or cfg["filters"].get("max_price", 60)) * 100)
