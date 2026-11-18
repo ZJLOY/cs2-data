@@ -115,7 +115,7 @@ def main():
     pat_db = pat.get("db") or {}
 
     # лоты CSFloat — тот же поиск, что в анализаторе; запросов не больше day_cf_requests (лимит ~200 в час на ключ)
-    data = load("sales.json.gz", {"sales": {}, "fetched": {}})
+    data = harvest.load_sales()
     # группы из своих продаж — для скинов без цен на cs2pattern-prices.com (номера по Skinflow)
     if pat.get("sf"):
         for b, v in pat["sf"].items():
@@ -143,7 +143,7 @@ def main():
     # история продаж CSFloat: ходовые предметы (сначала самые продаваемые), каждый — раз в day_sales_hours часов
     data.setdefault("fetched", {})
     t_now, every = int(time.time()), float(CFG.get("day_sales_hours", 6)) * 3600
-    due = sorted((n for n in wanted if t_now - data["fetched"].get(n, 0) >= every), key=lambda n: -(sp[n].get("v30") or 0))
+    due = sorted((n for n in wanted if t_now - data["fetched"].get(n, 0) >= every), key=lambda n: (data["fetched"].get(n, 0), -(sp[n].get("v30") or 0), n))
     deadline = t0 + float(CFG.get("day_time_budget_s", 600))
     done, got, left = harvest.collect_sales(data, due, deadline, int(CFG.get("day_sales_max", 200)))
     data["updated"] = t_now

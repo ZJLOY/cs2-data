@@ -41,12 +41,21 @@ jobs:
 
       - name: Скачать прошлые данные
         run: |
-          gh release view data >/dev/null 2>&1 || gh release create data -t data -n "Данные сборщика: продажи CSFloat"
-          gh release download data -p sales.json.gz -p items.json || true
+          gh release download data -p sales.json.gz -p items.json
+          mv status.json previous-status.json
+          gzip -t sales.json.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sales-before-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sales.json.gz
+          retention-days: 7
+          compression-level: 0
 
       - run: python harvest.py ${{ inputs.force && '--force' || '' }}
 
       - name: Загрузить данные
+        if: hashFiles('status.json') != ''
         run: |
           files=""
           for f in sales.json.gz items.json status.json hunt.json; do [ -f "$f" ] && files="$files $f"; done

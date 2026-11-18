@@ -256,13 +256,21 @@ def csfloat_sales(name):
     return out, left, di
 
 
+def load_sales():
+    with gzip.open("sales.json.gz", "rt", encoding="utf-8") as src:
+        data = json.load(src)
+    if not isinstance(data.get("sales"), dict) or not isinstance(data.get("fetched"), dict):
+        raise ValueError("Некорректный архив продаж CSFloat")
+    return data
+
+
 def collect_sales(data, names, deadline, max_requests):
     """Скачивает продажи CSFloat по названиям (по порядку), пока есть время и запросы; дописывает в data.
     Возвращает (обновлено предметов, новых продаж, осталось запросов)."""
     fetched, t_now = data.setdefault("fetched", {}), int(time.time())
     done, got, left = 0, 0, None
-    for n in names:
-        if time.time() > deadline or (left is not None and left <= CFG["reserve"]) or done >= max_requests:
+    for attempt, n in enumerate(dict.fromkeys(names)):
+        if time.time() > deadline or (left is not None and left <= CFG["reserve"]) or attempt >= max_requests:
             break
         try:
             rows, left, di = csfloat_sales(n)
@@ -273,11 +281,17 @@ def collect_sales(data, names, deadline, max_requests):
             break
         except Exception as e:
             print(f"  {n}: {str(e)[:80]}")
-            fetched[n] = t_now  # чтобы не застревать на одном предмете
+            time.sleep(CFG["pause_s"])
             continue
-        old = {(r[0], r[1]) for r in data["sales"].get(n, [])}
-        new = [r for r in rows if (r[0], r[1]) not in old]
-        data["sales"][n] = sorted(data["sales"].get(n, []) + new)
+        previous = data["sales"].get(n, [])
+        seen = {tuple(r[:4]) for r in previous}
+        new = []
+        for row in rows:
+            identity = tuple(row[:4])
+            if identity not in seen:
+                new.append(row)
+                seen.add(identity)
+        data["sales"][n] = sorted(previous + new, key=lambda r: r[0])
         fetched[n] = t_now
         done, got = done + 1, got + len(new)
         time.sleep(CFG["pause_s"])
@@ -294,10 +308,7 @@ def main():
         items = json.load(open("items.json", encoding="utf-8"))
     except (OSError, ValueError):
         items = {}
-    try:
-        data = json.load(gzip.open("sales.json.gz", "rt", encoding="utf-8"))
-    except (OSError, ValueError):
-        data = {"sales": {}, "fetched": {}}
+    data = load_sales()
     if (not items or time.time() - items.get("ts", 0) > CFG["list_refresh_hours"] * 3600
             or (CFG.get("hunt") and "targets" not in items)):
         try:

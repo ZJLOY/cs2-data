@@ -38,12 +38,13 @@ jobs:
       - run: pip install brotli ijson
 
       - name: Скачать прошлые данные
-        run: gh release download data -p sales.json.gz -p day_state.json -p pat_db.json.gz || true
+        run: gh release download data -p sales.json.gz -p day_state.json -p pat_db.json.gz
 
       - run: python day.py ${{ inputs.force && '--force' || '' }}
 
       - name: Загрузить данные
+        if: hashFiles('day_status.json') != ''
         run: |
           files=""
           for f in sales.json.gz cf_lots.json day_state.json pat_db.json.gz day_status.json; do [ -f "$f" ] && files="$files $f"; done
-          [ -n "$files" ] && gh release upload data $files --clobber || true
+          gh release upload data $files --clobber
