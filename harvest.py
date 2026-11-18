@@ -269,7 +269,9 @@ def collect_sales(data, names, deadline, max_requests):
     Возвращает (обновлено предметов, новых продаж, осталось запросов)."""
     fetched, t_now = data.setdefault("fetched", {}), int(time.time())
     done, got, left = 0, 0, None
-    for attempt, n in enumerate(dict.fromkeys(names)):
+    retry_after = data.setdefault("retry_after", {})
+    ready = (n for n in dict.fromkeys(names) if retry_after.get(n, 0) <= t_now)
+    for attempt, n in enumerate(ready):
         if time.time() > deadline or (left is not None and left <= CFG["reserve"]) or attempt >= max_requests:
             break
         try:
@@ -281,6 +283,7 @@ def collect_sales(data, names, deadline, max_requests):
             break
         except Exception as e:
             print(f"  {n}: {str(e)[:80]}")
+            retry_after[n] = t_now + 3600
             time.sleep(CFG["pause_s"])
             continue
         previous = data["sales"].get(n, [])
@@ -293,6 +296,7 @@ def collect_sales(data, names, deadline, max_requests):
                 seen.add(identity)
         data["sales"][n] = sorted(previous + new, key=lambda r: r[0])
         fetched[n] = t_now
+        retry_after.pop(n, None)
         done, got = done + 1, got + len(new)
         time.sleep(CFG["pause_s"])
     return done, got, left
