@@ -17,6 +17,7 @@ import time
 from datetime import datetime
 
 import cfround
+import forky
 import harvest
 import sources
 from harvest import CFG, KEY, MSK
@@ -54,8 +55,6 @@ def main():
     t0 = time.time()
 
     # цены площадок — чтобы выбрать предметы так же, как анализатор
-    sp = sources.skinport()
-    sp = {n: r for n, r in sp.items() if r.get("qty") or r.get("v90")}
     mk, _, errors = sources.csgotrader()
     for e in errors:
         print("  не удалось:", e)
@@ -63,6 +62,8 @@ def main():
         mk["marketcsgo"] = sources.market_csgo()
     except Exception as e:
         print("  Market.CSGO: не удалось:", str(e)[:100])
+    data = harvest.load_sales()
+    sp = sources.market_snapshot(mk.get("marketcsgo", {}), data.get("sales", {}))
     if "Lis-Skins" in (deal.get("deal_markets") or ["Lis-Skins"]):
         try:  # только самые низкие цены Lis-Skins (сами лоты анализатор скачивает сам)
             mk["lisskins"] = sources.lisskins(set(), lambda n: False)[0]
@@ -73,7 +74,7 @@ def main():
     except Exception:
         rate = deal.get("usd_rub_fallback", 80.0)
     rate *= 1 + deal.get("rub_markup", 0.021)
-    print(f"Цены площадок: Skinport {len(sp)}, " + ", ".join(f"{k} {len(v)}" for k, v in mk.items())
+    print(f"Цены площадок: каталог {len(sp)}, " + ", ".join(f"{k} {len(v)}" for k, v in mk.items())
           + f" — за {time.time() - t0:.0f} с")
 
     # цены редких паттернов — раз в pattern_refresh_days дней (или когда поменялся бюджет)
@@ -115,7 +116,6 @@ def main():
     pat_db = pat.get("db") or {}
 
     # лоты CSFloat — тот же поиск, что в анализаторе; запросов не больше day_cf_requests (лимит ~200 в час на ключ)
-    data = harvest.load_sales()
     # группы из своих продаж — для скинов без цен на cs2pattern-prices.com (номера по Skinflow)
     if pat.get("sf"):
         for b, v in pat["sf"].items():
@@ -124,11 +124,13 @@ def main():
         save("pat_db.json.gz", pat)
         print("Паттерны по своим продажам: " + ", ".join(f"{b} — продаж лучших номеров {len(pat_db[b][0]['sales'])}"
                                                      for b in pat["sf"]))
+    pat_db = forky.merge(pat_db, data["sales"])
     for b, di in (data.get("idx") or {}).items():  # номера скинов, которые узнал ночной сборщик, — для охоты
         state.setdefault("cf_idx", {}).setdefault(b, di)
     cbase = (lambda ch: lambda n: ch(n, "CSFloat"))(cfround.cheapest_fn(deal, sp, mk))
     wanted = cfround.wanted_names(deal, sp)
-    pat_names = {n for n in sp if cfround.pattern_base(n) in pat_db}
+    guide_names = {name for name in sp.keys() | data["sales"].keys() if forky.variant(name)}
+    pat_names = {n for n in sp if cfround.pattern_base(n) in pat_db} | guide_names
     t = time.time()
     lots, info = cfround.run(deal, KEY, wanted, pat_names, pat_db, cbase, {n: r.get("v30") or 0 for n, r in sp.items()},
                              rate, state, max_requests=int(CFG.get("day_cf_requests", 95)), reserve=10)
@@ -137,17 +139,24 @@ def main():
         save("cf_lots.json", {"ts": int(time.time()), "lots": lots,
                               "info": {"requests": info["requests"], "left": info["left"], "reset": info["reset"],
                                        "done": sorted(info["done"]), "idx": info["idx"], "pred": info["pred"],
-                                       "tags": info["tags"]}})
+                                       "tags": info["tags"], "details": info.get("details", {})}})
     save("day_state.json", state)
 
     # история продаж CSFloat: ходовые предметы (сначала самые продаваемые), каждый — раз в day_sales_hours часов
     data.setdefault("fetched", {})
     t_now, every = int(time.time()), float(CFG.get("day_sales_hours", 6)) * 3600
-    due = sorted((n for n in wanted if t_now - data["fetched"].get(n, 0) >= every), key=lambda n: (data["fetched"].get(n, 0), -(sp[n].get("v30") or 0), n))
+    due = sorted((n for n in wanted | guide_names if t_now - data["fetched"].get(n, 0) >= every),
+                 key=lambda n: (data["fetched"].get(n, 0), n not in guide_names,
+                                -((sp.get(n) or {}).get("v30") or 0), n))
     deadline = t0 + float(CFG.get("day_time_budget_s", 600))
     done, got, left = harvest.collect_sales(data, due, deadline, int(CFG.get("day_sales_max", 200)))
     data["updated"] = t_now
     save("sales.json.gz", data)
+    pat["db"] = forky.merge(pat_db, data["sales"])
+    save("pat_db.json.gz", pat)
+    guide_groups = [g for groups in pat["db"].values() for g in groups if g.get("source") == "forky"]
+    print(f"Forky: предметов {len(forky.CATALOG)}, групп {len(guide_groups)}, "
+          f"групп с продажами CSFloat {sum(bool(g['sales']) for g in guide_groups)}")
     print(f"Продажи CSFloat: обновлено предметов {done}, новых продаж {got}; в очереди {max(0, len(due) - done)}; "
           f"осталось запросов {left}")
     json.dump({"updated": now.strftime("%Y-%m-%d %H:%M МСК"), "lots": sum(map(len, lots.values())),

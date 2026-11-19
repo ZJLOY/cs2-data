@@ -131,9 +131,6 @@ def csgotrader():
     result, errors, stamps = {}, [], []
     g = lambda v, k: v.get(k) if isinstance(v, dict) else None
     parsers = {
-        "steam": lambda v: {"steam24": _price(g(v, "last_24h")), "steam7": _price(g(v, "last_7d")),
-                            "steam30": _price(g(v, "last_30d")), "steam90": _price(g(v, "last_90d"))},
-        "buff163": lambda v: {"buff_ask": _price(g(v, "starting_at")), "buff_bid": _price(g(v, "highest_order"))},
         "csfloat": lambda v: {"float_ask": _price(g(v, "starting_at")) or _price(v),
                               "float_bid": _price(g(v, "highest_order"))},
         "csmoney": lambda v: {"csmoney": _price(v)},
@@ -165,6 +162,23 @@ def market_csgo():
 
 
 # ---------- Waxpeer ----------
+
+def market_snapshot(rows, sales, now=None):
+    """Лоты Market.CSGO и выборка завершённых продаж CSFloat за скользящие окна."""
+    from statistics import median
+    now = int(now or time.time())
+    result = {}
+    for name in rows.keys() | sales.keys():
+        market = rows.get(name) or {}
+        row = {"min_price": market.get("mcsgo"), "qty": market.get("mcsgo_vol")}
+        history = [(r[0], r[1]) for r in sales.get(name, ()) if r[1] and now-90*86400 <= r[0] <= now]
+        for days, suffix in ((1,"24"), (7,"7"), (30,"30"), (90,"90")):
+            prices = [price for ts, price in history if ts >= now-days*86400]
+            row["v"+suffix] = len(prices)
+            row["m"+suffix] = median(prices) if prices else None
+        result[name] = row
+    return result
+
 
 def waxpeer():
     """Минимальная цена и число лотов на Waxpeer: {название: {wax_min, wax_qty}}. Цены у них в тысячных долях $."""
@@ -886,7 +900,7 @@ def csfloat_lots(jobs, api_key, reserve=10, log=print, max_requests=None):
     # jobs: (название, sort_by) — лоты одного предмета; или словарь параметров поиска по всему рынку
     # (sort_by, min_price/max_price в центах, def_index+paint_index+paint_seed «286,41» и т.п.) с "pages" — сколько страниц
     out, seen = {}, set()
-    info = {"requests": 0, "left": None, "reset": None, "done": set(), "idx": {}, "pred": {}, "tags": {}}
+    info = {"requests": 0, "left": None, "reset": None, "done": set(), "idx": {}, "pred": {}, "tags": {}, "details": {}}
     stop = False
     queue = list(jobs)
     while queue:
@@ -947,9 +961,20 @@ def csfloat_lots(jobs, api_key, reserve=10, log=print, max_requests=None):
                     info["pred"][lid] = ref["predicted_price"] / 100  # оценка CSFloat с учётом float
                 if tag:
                     info["tags"][lid] = tag
+                stats = (x.get("seller") or {}).get("statistics") or {}
+                bits = []
+                if stats.get("total_verified_trades") is not None:
+                    bits.append(f"Сделок у продавца: {stats['total_verified_trades']}")
+                if stats.get("median_trade_time") is not None:
+                    bits.append(f"медианное время передачи {stats['median_trade_time']} с")
+                for sticker in it.get("stickers") or []:
+                    if sticker.get("slot") is not None:
+                        bits.append(f"{sticker.get('name') or 'Наклейка'} · слот {sticker['slot']}")
+                if bits:
+                    info["details"][lid] = " · ".join(bits)
                 st = tuple((_cf_sticker(s.get("name")), round(s.get("wear") or 0, 3)) for s in it.get("stickers") or [])
                 out.setdefault(n, []).append(
-                    (price, it.get("float_value") or None, it.get("paint_seed"), st, lid, it.get("inspect_link") or ""))
+                    (price, it.get("float_value"), it.get("paint_seed"), st, lid, it.get("inspect_link") or ""))
             cursor = d.get("cursor") if isinstance(d, dict) else None
             time.sleep(0.3)
             if not cursor:
@@ -998,10 +1023,10 @@ def pattern_group(href):
     seeds = sorted({int(x) for x in re.findall(re.escape(href) + r"/(\d+)", html)})
     t = _rsc(html)
     sales, seen = [], set()
-    head = re.compile(r'\{"id":(\d+),"csfloatId":"\d+","patternIndex":(\d+),"wearCondition":"(FN|MW|FT|WW|BS)",'
+    head = re.compile(r'\{"id":(\d+),"csfloatId":"(\d+)","patternIndex":(\d+),"wearCondition":"(FN|MW|FT|WW|BS)",'
                       r'"floatValue":[\d.eE-]+,"priceUsd":([\d.]+),"soldAt":"(\d{4}-\d\d-\d\d)[^"]*","stickers":(null|\[)')
     for m in head.finditer(t):
-        sid, seed, wear, price, day, st = m.groups()
+        sid, cfid, seed, wear, price, day, st = m.groups()
         k = t.find('"isStattrak":', m.end())
         flag = t[k + 13:k + 18] if k >= 0 else "null"
         if sid in seen or st != "null":
@@ -1009,7 +1034,7 @@ def pattern_group(href):
         seen.add(sid)
         fv = re.search(r'"floatValue":([0-9.eE-]+)', m.group(0))
         sales.append([int(seed), wear, "st" if flag.startswith("true") else "normal", float(price), day,
-                      float(fv.group(1)) if fv else None])
+                      float(fv.group(1)) if fv else None, cfid])
     return {"seeds": seeds, "sales": sales}
 
 
@@ -1168,7 +1193,7 @@ MCSGO_EXPORT = "https://market.csgo.com/api/full-export/"
 CERT_LINK = "steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20"
 
 
-def mcsgo_lots(keep_floats, keep_stickers, min_transfer=0, threads=4, log=print):
+def mcsgo_lots(keep_floats, keep_stickers, min_transfer=0, threads=4, log=print, details=None):
     """
     Все лоты Market.CSGO (открытая выгрузка, без ключа, ~120 файлов по 10 000 лотов).
     float, паттерн и наклейки берём из сертификата осмотра (как ссылку осмотра у Waxpeer).
@@ -1182,7 +1207,7 @@ def mcsgo_lots(keep_floats, keep_stickers, min_transfer=0, threads=4, log=print)
     from concurrent.futures import ThreadPoolExecutor
     idx, _ = get_json(MCSGO_EXPORT + "USD.json")
     fmt = {c: i for i, c in enumerate(idx["format"])}
-    i_price, i_id, i_name, i_cert = fmt["price"], fmt["id"], fmt["market_hash_name"], fmt["inspect_certificate"]
+    i_price, i_id, i_name, i_cert = fmt["price"], fmt["id"], fmt["market_hash_name"], fmt.get("inspect_certificate")
     i_ch = fmt.get("chance_to_transfer")
     names = sticker_names()
     floats, stick, cheap, prices = {}, [], {}, {}
@@ -1218,15 +1243,29 @@ def mcsgo_lots(keep_floats, keep_stickers, min_transfer=0, threads=4, log=print)
                     continue
                 if i_ch is not None and (r[i_ch] or 0) < min_transfer:
                     continue
-                cert = r[i_cert]
-                dec = inspect_decode(CERT_LINK + cert) if cert else None
-                if not dec:
-                    continue
-                fl, seed, st = dec
+                cert = r[i_cert] if i_cert is not None else None
+                link = CERT_LINK + cert if cert else ""
+                dec = inspect_decode(link) if link else None
+                fl, seed, st = dec or (None, None, ())
+                if fl is None and "float" in fmt and r[fmt["float"]] not in (None, "", "0", 0):
+                    try:
+                        parsed = float(r[fmt["float"]])
+                        fl = parsed if 0 <= parsed <= 1 else None
+                    except (TypeError, ValueError):
+                        pass
+                if seed is None and "paintseed" in fmt and r[fmt["paintseed"]] not in (None, ""):
+                    try:
+                        seed = int(r[fmt["paintseed"]])
+                    except (TypeError, ValueError):
+                        pass
                 st = tuple((names.get(sid) or f"Sticker #{sid}", round(w, 3)) for sid, w in st)
-                rec = (price, fl if fl else None, seed, st, str(r[i_id]), CERT_LINK + cert)
+                if details is not None and "phase" in fmt and r[fmt["phase"]]:
+                    phase = str(r[fmt["phase"]])
+                    paint = r[fmt["paintindex"]] if "paintindex" in fmt else None
+                    details[str(r[i_id])] = f"Фаза {phase}" + (f" · paint index {paint}" if paint is not None else "")
+                rec = (price, fl, seed, st, str(r[i_id]), link)
                 if want_f:
-                    if fl:
+                    if fl is not None:
                         floats.setdefault(name, []).append(rec)
                     c = cheap.setdefault(name, [])
                     if len(c) < 5 or price < c[-1][0]:

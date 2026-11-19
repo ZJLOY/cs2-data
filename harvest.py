@@ -204,13 +204,13 @@ def hunt(items, idx, max_requests):
 
 
 def build_items():
-    q = "app_id=730&currency=USD"
-    listings, _ = get_json(f"https://api.skinport.com/v1/items?{q}")
-    sales, _ = get_json(f"https://api.skinport.com/v1/sales/history?{q}")
-    price = {it["market_hash_name"]: it.get("min_price") for it in listings}
-    vol = {it["market_hash_name"]: ((it.get("last_30_days") or {}).get("volume") or 0,
-                                    (it.get("last_7_days") or {}).get("median")) for it in sales}
-    bases = pattern_bases() | set(CFG.get("extra_patterns") or [])  # + скины без цен на сайте: копим их продажи
+    import sources
+    import forky
+    market = sources.market_csgo()
+    snapshot = sources.market_snapshot(market, load_sales().get("sales", {}))
+    price = {name: row["min_price"] for name, row in snapshot.items()}
+    vol = {name: (row["v30"], row["m7"]) for name, row in snapshot.items()}
+    bases = pattern_bases() | set(forky.CATALOG) | set(CFG.get("extra_patterns") or [])  # + скины без цен на сайте: копим их продажи
     cheap = {}
     for n, p in price.items():
         if p and not n.startswith("Souvenir "):
@@ -222,6 +222,10 @@ def build_items():
     f = CFG["liquid"]
     liq = sorted(n for n, (v30, m7) in vol.items() if v30 >= f["min_volume_30d"] and m7
                  and f["min_price"] <= m7 <= f["max_price"] and n not in pat)
+    # Ликвидные предложения без истории включаем для первичного сбора CSFloat.
+    known = set(pat) | set(liq)
+    liq.extend(sorted(n for n,r in market.items() if n not in known and r.get("mcsgo") and
+                      f["min_price"] <= r["mcsgo"] <= f["max_price"] and r["mcsgo_vol"] >= f["min_volume_30d"] and n.endswith(")")))
     print(f"Список: скинов с паттернами {len(ok)} ({len(pat)} названий), ходовых предметов {len(liq)}")
     targets = pattern_targets(ok, CFG["hunt_max_tier"]) if CFG.get("hunt") else {}
     print(f"Охота: редких номеров (тиры до {CFG['hunt_max_tier']}) — {sum(map(len, targets.values()))} по {len(targets)} скинам")
