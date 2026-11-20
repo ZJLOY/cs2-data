@@ -15,10 +15,10 @@
  "pattern_refresh_days": 3,
  "rub_markup": 0.021,
  "csfloat_lots_items": 40,
- "csfloat_lots_core": 10,
+ "csfloat_lots_core": 7,
  "csfloat_lots_pattern_items": 15,
  "csfloat_scan": {
-  "most_recent": 3,
+  "most_recent": 6,
   "best_deal": 5,
   "highest_discount": 3,
   "lowest_float": 0
