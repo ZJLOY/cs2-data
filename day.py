@@ -40,6 +40,27 @@ def save(path, obj):
         json.dump(obj, open(path, "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
 
 
+def pattern_base(name):
+    return cfround.pattern_base(name.replace("★ StatTrak™ ", "★ ", 1))
+
+
+def priority_sales(lis_lots, cf_lots, pat_db, fetched, now, every, budget, limit=25):
+    """Refresh titles with affordable rare listings before the regular sales queue."""
+    seeds = {base: {int(seed) for group in groups for seed in group["seeds"]} for base, groups in pat_db.items()}
+    lowest = {}
+    for market in (lis_lots, cf_lots):
+        for name, rows in market.items():
+            eligible = seeds.get(pattern_base(name))
+            if not eligible or name.startswith("Souvenir ") or now - fetched.get(name, 0) < every:
+                continue
+            best = min((price for price, fl, seed, *_ in rows
+                        if fl is not None and str(seed).isdigit() and int(seed) in eligible and price <= budget),
+                       default=None)
+            if best is not None:
+                lowest[name] = min(best, lowest.get(name, best))
+    return sorted(lowest, key=lambda name: (fetched.get(name, 0), lowest[name], name))[:limit]
+
+
 def main():
     now = datetime.now(MSK)
     night, _ = harvest.allowed(now)
@@ -52,6 +73,7 @@ def main():
     if not deal:
         sys.exit("Нет deal.json (его отправляет «python skins.py push»)")
     state = load("day_state.json", {})
+    pat = load("pat_db.json.gz", {})
     t0 = time.time()
 
     # цены площадок — чтобы выбрать предметы так же, как анализатор
@@ -64,9 +86,13 @@ def main():
         print("  Market.CSGO: не удалось:", str(e)[:100])
     data = harvest.load_sales()
     sp = sources.market_snapshot(mk.get("marketcsgo", {}), data.get("sales", {}))
+    lis_lots = {}
     if "Lis-Skins" in (deal.get("deal_markets") or ["Lis-Skins"]):
-        try:  # только самые низкие цены Lis-Skins (сами лоты анализатор скачивает сам)
-            mk["lisskins"] = sources.lisskins(set(), lambda n: False)[0]
+        bases = set(pat.get("db") or {}) | set(forky.CATALOG)
+        catalog = sp.keys() | data["sales"].keys() | (mk.get("csfloat") or {}).keys()
+        lis_names = {name for name in catalog if pattern_base(name) in bases and not name.startswith("Souvenir ")}
+        try:
+            mk["lisskins"], lis_lots, _, _, _ = sources.lisskins(lis_names, lambda n: False)
         except Exception as e:
             print("  Lis-Skins: не удалось:", str(e)[:100])
     try:
@@ -78,7 +104,6 @@ def main():
           + f" — за {time.time() - t0:.0f} с")
 
     # цены редких паттернов — раз в pattern_refresh_days дней (или когда поменялся бюджет)
-    pat = load("pat_db.json.gz", {})
     budget_key = f"{deal.get('patterns_max_price_rub')}|v2"
     if (not pat.get("db") or pat.get("budget") != budget_key
             or time.time() - pat.get("ts", 0) > deal.get("pattern_refresh_days", 3) * 86400):
@@ -106,7 +131,7 @@ def main():
     cbase = (lambda ch: lambda n: ch(n, "CSFloat"))(cfround.cheapest_fn(deal, sp, mk))
     wanted = cfround.wanted_names(deal, sp)
     guide_names = {name for name in sp.keys() | data["sales"].keys() if forky.variant(name)}
-    pat_names = {n for n in sp if cfround.pattern_base(n) in pat_db} | guide_names
+    pat_names = {n for n in sp if pattern_base(n) in pat_db} | guide_names
     t = time.time()
     lots, info = cfround.run(deal, KEY, wanted, pat_names, pat_db, cbase, {n: r.get("v30") or 0 for n, r in sp.items()},
                              rate, state, max_requests=int(CFG.get("day_cf_requests", 95)), reserve=10)
@@ -121,9 +146,13 @@ def main():
     # история продаж CSFloat: ходовые предметы (сначала самые продаваемые), каждый — раз в day_sales_hours часов
     data.setdefault("fetched", {})
     t_now, every = int(time.time()), float(CFG.get("day_sales_hours", 6)) * 3600
-    due = sorted((n for n in wanted | guide_names if t_now - data["fetched"].get(n, 0) >= every),
-                 key=lambda n: (data["fetched"].get(n, 0), n not in guide_names,
+    budget = (deal.get("patterns_max_price_rub") or 10 ** 9) / rate
+    priority = priority_sales(lis_lots, lots, pat_db, data["fetched"], t_now, every, budget)
+    priority_set = set(priority)
+    due = priority + sorted((n for n in wanted | pat_names if n not in priority_set and t_now - data["fetched"].get(n, 0) >= every),
+                 key=lambda n: (data["fetched"].get(n, 0), n not in pat_names,
                                 -((sp.get(n) or {}).get("v30") or 0), n))
+    print(f"История CSFloat: в начале очереди {len(priority)} предметов с редкими лотами в бюджете")
     deadline = t0 + float(CFG.get("day_time_budget_s", 600))
     done, got, left = harvest.collect_sales(data, due, deadline, int(CFG.get("day_sales_max", 200)))
     data["updated"] = t_now
